@@ -1,5 +1,10 @@
 # Literature Finder
 
+## Live Demo
+
+Try the app here: [Literature Finder](https://whatyouneed-paper-finder.streamlit.app/)
+
+
 ## App Screenshot
 
 ![Literature Finder screenshot](screenshot.png)
