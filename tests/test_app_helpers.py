@@ -145,6 +145,95 @@ class AppHelperTests(unittest.TestCase):
         self.assertIn("https://oa.example/full-text", markdown)
         self.assertIn("Open access found", markdown)
 
+    def test_display_columns_put_most_useful_fields_first(self):
+        self.assertEqual(
+            app.display_columns()[:10],
+            [
+                "title",
+                "year",
+                "venue",
+                "citation_count",
+                "access_status",
+                "best_access_url",
+                "doi",
+                "authors",
+                "abstract",
+                "matched_keyword",
+            ],
+        )
+
+    def test_ui_guidance_copy_is_available(self):
+        self.assertEqual(
+            app.SUBTITLE,
+            "Find papers, legal access links, and export-ready literature tables.",
+        )
+        self.assertIn("one search query per line", app.KEYWORD_HELPER_NOTE)
+        self.assertIn("connect multiple concepts", app.KEYWORD_HELPER_NOTE)
+        self.assertIn("perceived control AND depression AND stress", app.KEYWORD_HELPER_NOTE)
+        self.assertIn("perceived control AND depression AND stress", app.EXAMPLE_SEARCHES)
+        self.assertIn("autism disclosure employment", app.EXAMPLE_SEARCHES)
+        self.assertIn("autistic college students STEM", app.EXAMPLE_SEARCHES)
+        self.assertIn("adolescent depression intervention", app.EXAMPLE_SEARCHES)
+        self.assertIn("try broader keywords", app.NO_RESULTS_GUIDANCE)
+        self.assertIn("remove year filters", app.NO_RESULTS_GUIDANCE)
+        self.assertIn("uncheck Require abstract", app.NO_RESULTS_GUIDANCE)
+        self.assertIn("search one concept at a time", app.NO_RESULTS_GUIDANCE)
+        self.assertIn("best legal access link", app.BEST_ACCESS_URL_EXPLANATION)
+        self.assertIn("Open access found", app.ACCESS_STATUS_EXPLANATION)
+        self.assertIn("DOI/publisher only", app.ACCESS_STATUS_EXPLANATION)
+        self.assertIn("No access link found", app.ACCESS_STATUS_EXPLANATION)
+        self.assertIn("light exploratory use", app.PUBLIC_DEMO_NOTE)
+        self.assertIn("cleaned literature search table", app.SOFT_CTA)
+        self.assertIn("does not scrape Google Scholar", app.LEGAL_ETHICAL_DISCLAIMER)
+
+    def test_public_demo_limits_are_capped(self):
+        self.assertEqual(app.DEMO_SEARCH_LIMIT, 5)
+        self.assertEqual(app.MAX_KEYWORD_LINES, 5)
+        self.assertEqual(app.MAX_RESULTS_PER_KEYWORD, 30)
+        self.assertTrue(app.can_run_demo_search(0))
+        self.assertTrue(app.can_run_demo_search(4))
+        self.assertFalse(app.can_run_demo_search(5))
+
+    def test_parse_keyword_lines_enforces_demo_line_limit(self):
+        keywords = app.parse_keyword_lines("a\n\nb\n c ")
+        self.assertEqual(keywords, ["a", "b", "c"])
+        self.assertTrue(app.is_within_keyword_line_limit(keywords))
+        self.assertFalse(app.is_within_keyword_line_limit(["a", "b", "c", "d", "e", "f"]))
+
+    def test_search_literature_does_not_emit_per_paper_status_updates(self):
+        status_area = Mock()
+        rows = [
+            {
+                "title": "A",
+                "doi": "10.1/a",
+                "year": 2024,
+                "abstract": "abstract",
+                "citation_count": 1,
+                "relevance_score": 1,
+                "publisher_url": "",
+                "openalex_oa_url": "",
+                "unpaywall_oa_url": "",
+            },
+            {
+                "title": "B",
+                "doi": "10.1/b",
+                "year": 2023,
+                "abstract": "abstract",
+                "citation_count": 2,
+                "relevance_score": 2,
+                "publisher_url": "",
+                "openalex_oa_url": "",
+                "unpaywall_oa_url": "",
+            },
+        ]
+
+        with patch.object(app, "search_openalex", return_value=rows), patch.object(
+            app, "lookup_unpaywall_oa_url", return_value=""
+        ), patch.object(app.time, "sleep"):
+            app.search_literature(["autism"], 10, None, None, False, "relevance", status_area)
+
+        status_area.info.assert_not_called()
+
     def test_get_openalex_api_key_prefers_streamlit_secrets(self):
         with patch.dict("os.environ", {"OPENALEX_API_KEY": "env-key"}):
             self.assertEqual(app.get_openalex_api_key({"OPENALEX_API_KEY": "secret-key"}), "secret-key")

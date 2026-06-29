@@ -11,6 +11,78 @@ OPENALEX_URL = "https://api.openalex.org/works"
 UNPAYWALL_URL_TEMPLATE = "https://api.unpaywall.org/v2/{doi}"
 DEFAULT_PAUSE_SECONDS = 0.2
 OPENALEX_ERROR_SNIPPET_LENGTH = 500
+DEMO_SEARCH_LIMIT = 5
+MAX_KEYWORD_LINES = 5
+MAX_RESULTS_PER_KEYWORD = 30
+SUBTITLE = "Find papers, legal access links, and export-ready literature tables."
+EXAMPLE_SEARCHES = [
+    "perceived control AND depression AND stress",
+    "autism disclosure employment",
+    "autistic college students STEM",
+    "adolescent depression intervention",
+]
+KEYWORD_HELPER_NOTE = "\n".join(
+    [
+        "Enter one search query per line. Each line is searched separately.",
+        "",
+        "Tip: If you want papers that connect multiple concepts, put them in the same line with AND.",
+        "Example: perceived control AND depression AND stress",
+        "",
+        "For broader searches, use separate lines:",
+        "perceived control",
+        "depression",
+        "stress",
+    ]
+)
+NO_RESULTS_GUIDANCE = "\n".join(
+    [
+        "No results matched the current keywords and filters.",
+        "",
+        "Suggestions:",
+        "- try broader keywords",
+        "- remove year filters",
+        "- uncheck Require abstract",
+        "- search one concept at a time",
+    ]
+)
+BEST_ACCESS_URL_EXPLANATION = (
+    "best_access_url is the best legal access link found by the tool. It may be an open-access "
+    "full text, repository copy, publisher page, or DOI page."
+)
+ACCESS_STATUS_EXPLANATION = "\n".join(
+    [
+        "- Open access found: a legal access link was found",
+        "- DOI/publisher only: no OA full-text link was found, but DOI or publisher page is available",
+        "- No access link found: no reliable access link was found",
+    ]
+)
+PUBLIC_DEMO_NOTE = (
+    "This public demo is intended for light exploratory use. For larger searches, run the "
+    "open-source version locally with your own OpenAlex API key."
+)
+DEMO_LIMIT_MESSAGE = (
+    "You have reached the demo search limit for this session. For larger searches, please run the "
+    "open-source version locally with your own OpenAlex API key or contact me for a cleaned "
+    "literature search package."
+)
+SOFT_CTA = "\n".join(
+    [
+        "Need a cleaned literature search table?",
+        "",
+        "For beta literature search packages, contact me through the platform where you found this tool.",
+    ]
+)
+LEGAL_ETHICAL_DISCLAIMER = (
+    "This tool supports exploratory literature discovery. It does not replace a systematic review "
+    "or librarian-assisted database search. It does not scrape Google Scholar, bypass paywalls, or "
+    "download copyrighted PDFs."
+)
+HOW_TO_USE_RESULTS = [
+    "Use CSV for screening and sorting",
+    "Use Markdown for notes or drafting",
+    "Start from best_access_url for legal access",
+    "Treat results as exploratory, not exhaustive",
+]
 
 
 class OpenAlexRequestError(requests.RequestException):
@@ -228,6 +300,18 @@ def sort_results(rows: List[Dict[str, Any]], sort_by: str) -> List[Dict[str, Any
     return sorted(rows, key=lambda row: row.get("relevance_score") or 0, reverse=True)
 
 
+def parse_keyword_lines(keywords_text: str) -> List[str]:
+    return [line.strip() for line in keywords_text.splitlines() if line.strip()]
+
+
+def is_within_keyword_line_limit(keywords: List[str]) -> bool:
+    return len(keywords) <= MAX_KEYWORD_LINES
+
+
+def can_run_demo_search(searches_used: int) -> bool:
+    return searches_used < DEMO_SEARCH_LIMIT
+
+
 def deduplicate_results(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     seen = set()
     unique_rows = []
@@ -282,18 +366,18 @@ def results_to_markdown(rows: List[Dict[str, Any]]) -> str:
 def display_columns() -> List[str]:
     return [
         "title",
-        "authors",
         "year",
         "venue",
         "citation_count",
-        "abstract",
-        "doi",
         "access_status",
         "best_access_url",
+        "doi",
+        "authors",
+        "abstract",
+        "matched_keyword",
         "publisher_url",
         "openalex_oa_url",
         "unpaywall_oa_url",
-        "matched_keyword",
     ]
 
 
@@ -308,7 +392,6 @@ def search_literature(
 ) -> List[Dict[str, Any]]:
     all_rows = []
     for keyword in keywords:
-        status_area.info(f"Searching OpenAlex for: {keyword}")
         try:
             keyword_rows = search_openalex(keyword, max_results, minimum_year, maximum_year, sort_by)
         except OpenAlexRequestError as error:
@@ -327,7 +410,6 @@ def search_literature(
     for index, row in enumerate(rows, start=1):
         if not row.get("doi"):
             continue
-        status_area.info(f"Checking Unpaywall open-access link {index} of {len(rows)}")
         try:
             row["unpaywall_oa_url"] = lookup_unpaywall_oa_url(row["doi"])
         except requests.RequestException as error:
@@ -345,19 +427,35 @@ def render_app() -> None:
 
     st.set_page_config(page_title="Literature Finder", layout="wide")
     st.title("Literature Finder")
+    st.subheader(SUBTITLE)
 
     st.caption(
         "Searches OpenAlex and uses Unpaywall for legal open-access links when a DOI is available. "
         "Semantic Scholar is intentionally left disabled for a future optional source."
     )
+    st.caption(PUBLIC_DEMO_NOTE)
 
+    with st.expander("Example searches"):
+        st.code("\n".join(EXAMPLE_SEARCHES), language=None)
+
+    st.markdown(KEYWORD_HELPER_NOTE)
     keywords_text = st.text_area(
         "Research keywords",
         height=160,
-        placeholder="autism disclosure employment\nautistic college students STEM\nautism job interview",
+        placeholder=(
+            "perceived control AND depression AND stress\n"
+            "autism disclosure employment\n"
+            "autistic college students STEM"
+        ),
     )
 
-    max_results = st.number_input("Max results per keyword", min_value=1, max_value=200, value=20, step=1)
+    max_results = st.number_input(
+        "Max results per keyword",
+        min_value=1,
+        max_value=MAX_RESULTS_PER_KEYWORD,
+        value=20,
+        step=1,
+    )
 
     st.subheader("Optional filters")
     filter_columns = st.columns(4)
@@ -371,17 +469,30 @@ def render_app() -> None:
         sort_by = st.selectbox("Sort by", ["relevance", "citation count", "year"])
 
     status_area = st.empty()
+    if "demo_search_count" not in st.session_state:
+        st.session_state.demo_search_count = 0
+
+    searches_used = int(st.session_state.demo_search_count)
+    searches_remaining = max(DEMO_SEARCH_LIMIT - searches_used, 0)
+    st.caption(f"Demo searches remaining this session: {searches_remaining}/{DEMO_SEARCH_LIMIT}")
 
     if st.button("Search", type="primary"):
-        keywords = [line.strip() for line in keywords_text.splitlines() if line.strip()]
+        keywords = parse_keyword_lines(keywords_text)
         if not keywords:
             st.warning("Enter at least one keyword, one per line.")
+            return
+        if not is_within_keyword_line_limit(keywords):
+            st.warning(f"Enter no more than {MAX_KEYWORD_LINES} keyword lines for the public demo.")
             return
         if minimum_year and maximum_year and minimum_year > maximum_year:
             st.warning("Minimum year must be less than or equal to maximum year.")
             return
+        if not can_run_demo_search(searches_used):
+            st.warning(DEMO_LIMIT_MESSAGE)
+            return
 
-        with st.spinner("Searching literature APIs..."):
+        st.session_state.demo_search_count = searches_used + 1
+        with st.spinner("Searching papers and checking legal access links..."):
             try:
                 rows = search_literature(
                     keywords=keywords,
@@ -399,40 +510,50 @@ def render_app() -> None:
                 st.error(f"OpenAlex search failed: {error}")
                 return
 
-        status_area.success(f"Found {len(rows)} unique papers.")
+        status_area.empty()
+        st.caption(f"Found {len(rows)} unique papers.")
         if not rows:
-            st.info("No results matched the current keywords and filters.")
-            return
-
-        table_rows = [{column: row.get(column, "") for column in display_columns()} for row in rows]
-        st.dataframe(
-            table_rows,
-            width="stretch",
-            column_config={
-                "best_access_url": st.column_config.LinkColumn("best access URL"),
-                "publisher_url": st.column_config.LinkColumn("publisher URL"),
-                "openalex_oa_url": st.column_config.LinkColumn("OpenAlex OA URL"),
-                "unpaywall_oa_url": st.column_config.LinkColumn("Unpaywall OA URL"),
-            },
-        )
-
-        csv_data = results_to_csv(rows)
-        markdown_data = results_to_markdown(rows)
-        download_columns = st.columns(2)
-        with download_columns[0]:
-            st.download_button(
-                "Download CSV",
-                data=csv_data,
-                file_name="literature_finder_results.csv",
-                mime="text/csv",
+            st.info(NO_RESULTS_GUIDANCE)
+        else:
+            table_rows = [{column: row.get(column, "") for column in display_columns()} for row in rows]
+            st.dataframe(
+                table_rows,
+                width="stretch",
+                column_config={
+                    "best_access_url": st.column_config.LinkColumn("best access URL"),
+                    "publisher_url": st.column_config.LinkColumn("publisher URL"),
+                    "openalex_oa_url": st.column_config.LinkColumn("OpenAlex OA URL"),
+                    "unpaywall_oa_url": st.column_config.LinkColumn("Unpaywall OA URL"),
+                },
             )
-        with download_columns[1]:
-            st.download_button(
-                "Download Markdown",
-                data=markdown_data,
-                file_name="literature_finder_results.md",
-                mime="text/markdown",
-            )
+
+            st.caption(BEST_ACCESS_URL_EXPLANATION)
+            st.markdown(ACCESS_STATUS_EXPLANATION)
+
+            csv_data = results_to_csv(rows)
+            markdown_data = results_to_markdown(rows)
+            download_columns = st.columns(2)
+            with download_columns[0]:
+                st.download_button(
+                    "Download CSV",
+                    data=csv_data,
+                    file_name="literature_finder_results.csv",
+                    mime="text/csv",
+                )
+            with download_columns[1]:
+                st.download_button(
+                    "Download Markdown",
+                    data=markdown_data,
+                    file_name="literature_finder_results.md",
+                    mime="text/markdown",
+                )
+
+    st.divider()
+    st.subheader("How to use the results")
+    st.markdown("\n".join(f"- {item}" for item in HOW_TO_USE_RESULTS))
+    st.caption(LEGAL_ETHICAL_DISCLAIMER)
+    st.divider()
+    st.markdown(SOFT_CTA)
 
 
 if __name__ == "__main__":
