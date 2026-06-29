@@ -1,5 +1,10 @@
 # Literature Finder
 
+## App Screenshot
+
+![Literature Finder screenshot](screenshot.png)
+
+
 Literature Finder is a Python and Streamlit tool for finding academic papers and legal access links from scholarly metadata APIs.
 
 ## Features
